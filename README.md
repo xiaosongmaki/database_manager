@@ -101,10 +101,3 @@ deleted_count = backup.clean_old_backups(days=7)
 print(f"Deleted {deleted_count} old backups")
 ```
 
-## License
-
-This project is proprietary and confidential.
-
-## Author
-
-Your Name/Company
