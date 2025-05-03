@@ -36,7 +36,7 @@ def create_backup_task(db_manager, storage_manager):
 
 
 @flow
-def main():
+def database_backup():
     logger = get_run_logger()
     logger.info("开始数据库备份流程")
     
