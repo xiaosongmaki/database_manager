@@ -2,6 +2,7 @@ from prefect import task, flow, get_run_logger
 from prefect.blocks.system import Secret
 from src.backup import DatabaseBackup
 import os
+import json
 
 @task(name="create-backup-task")
 def create_backup_task(db_manager, storage_manager):
@@ -39,21 +40,10 @@ def main():
     logger = get_run_logger()
     logger.info("开始数据库备份流程")
     
-    # 从 Prefect 块中加载环境变量
+    # 从 Prefect 块中加载配置
     try:
-        # 示例：获取数据库连接信息
-        db_host = Secret.load("mysql-host").get()
-        db_port = Secret.load("mysql-port").get()
-        db_user = Secret.load("mysql-user").get()
-        db_password = Secret.load("mysql-password").get()
-        db_name = Secret.load("mysql-database").get()
-        
-        # 存储服务连接信息
-        minio_endpoint = Secret.load("minio-endpoint").get()
-        minio_access_key = Secret.load("minio-access-key").get()
-        minio_secret_key = Secret.load("minio-secret-key").get()
-        minio_bucket = Secret.load("minio-bucket").get()
-        
+        # 获取配置
+        config = Secret.load("backup-config").get()            
         logger.info("成功从 Prefect Secret 块中加载配置")
     except Exception as e:
         logger.error(f"无法从 Prefect Secret 块获取配置: {str(e)}")
@@ -65,18 +55,19 @@ def main():
     
     # 创建管理器实例 - 使用配置参数
     db_manager = MySQLManager(
-        host=db_host,
-        port=db_port,
-        user=db_user,
-        password=db_password,
-        database=db_name
+        host=config["MYSQL_HOST"],
+        port=int(config["MYSQL_PORT"]),
+        user=config["MYSQL_USER"],
+        password=config["MYSQL_PASSWORD"],
+        database=config["MYSQL_DATABASE"]
     )
     
     storage_manager = MinioManager(
-        endpoint=minio_endpoint,
-        access_key=minio_access_key,
-        secret_key=minio_secret_key,
-        bucket=minio_bucket
+        endpoint=config["MINIO_ENDPOINT"],
+        access_key=config["MINIO_ACCESS_KEY"],
+        secret_key=config["MINIO_SECRET_KEY"],
+        bucket=config["MINIO_BUCKET"],
+        secure=config["MINIO_SECURE"] if isinstance(config["MINIO_SECURE"], bool) else config["MINIO_SECURE"].lower() == "true"
     )
     
     # 运行备份任务
