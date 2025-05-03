@@ -189,6 +189,9 @@ class MinioManager(StorageManager):
                 content_type = 'application/octet-stream'
         
         try:
+            # 获取文件大小
+            file_size = os.path.getsize(local_path)
+            
             # 上传文件
             self.logger.info(f"开始上传文件到MinIO: {remote_path}")
             
@@ -200,7 +203,7 @@ class MinioManager(StorageManager):
             )
             
             self.logger.info(f"成功上传文件到MinIO: {result.object_name}, "
-                            f"大小: {result.size} 字节, etag: {result.etag}")
+                            f"大小: {file_size} 字节, etag: {result.etag}")
             
             return result.object_name
             
@@ -319,8 +322,31 @@ if __name__ == "__main__":
     manager = MinioManager()
     manager.connect()
     print("连接状态:", manager.is_connected())
+    
     # 测试列出所有文件
     files = manager.list_files()
     print("MinIO文件列表:")
     for f, size in files:
         print(f"{f} ({size} bytes)")
+    
+    # 测试上传文件
+    try:
+        # 创建一个测试文件
+        test_file = "test_upload_2.txt"
+        with open(test_file, "w") as f:
+            f.write("这是一个测试文件，用于验证MinIO上传功能")
+        
+        # 上传文件
+        remote_path = manager.upload_file(test_file)
+        print(f"文件已成功上传到: {remote_path}")
+        
+        # 再次列出文件，确认上传成功
+        files = manager.list_files()
+        print("上传后的文件列表:")
+        for f, size in files:
+            print(f"{f} ({size} bytes)")
+            
+        # 清理测试文件
+        os.remove(test_file)
+    except Exception as e:
+        print(f"上传文件失败: {e}")

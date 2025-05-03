@@ -142,7 +142,8 @@ class MySQLManager(DatabaseManager):
             f"--port={self.port}",
             f"--user={self.user}",
             f"--password={self.password}",
-            "--single-transaction"  # 保证备份一致性
+            "--single-transaction",  # 保证备份一致性
+            "--protocol=TCP"  # 确保使用TCP/IP连接
         ]
         
         # 是否锁表
@@ -189,3 +190,13 @@ class MySQLManager(DatabaseManager):
             if os.path.exists(output_path):
                 os.remove(output_path)
             raise
+
+
+
+
+if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO)
+    manager = MySQLManager()
+    manager.connect()
+    print("连接状态:", manager.is_connected())
+    manager.dump(output_dir="./tmp/mysql_dumps",filename="test.sql")
