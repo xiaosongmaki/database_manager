@@ -8,4 +8,5 @@ dependencies = [
     "dotenv>=0.9.9",
     "minio>=7.2.15",
     "mysql-connector-python>=9.3.0",
+    "prefect>=3.4.0",
 ]

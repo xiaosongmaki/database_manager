@@ -88,3 +88,6 @@ $RECYCLE.BIN/
 # tmp files
 tmp/
 /tmp/ 
+
+# 部署文件夹
+/deploy

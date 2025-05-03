@@ -3,7 +3,7 @@ import logging
 import datetime
 import shutil
 from typing import Optional, Dict, Any, List
-
+from prefect import flow
 from src.database_manager import DatabaseManager
 from src.minio_manager import StorageManager
 from src.config import BACKUP_DIR
@@ -270,7 +270,9 @@ class DatabaseBackup:
         return f"{size_bytes:.2f} PB"
 
 
-if __name__ == "__main__":
+
+@flow
+def main():
     # 配置日志
     logging.basicConfig(
         level=logging.INFO,
@@ -307,3 +309,6 @@ if __name__ == "__main__":
         
         # 清理临时文件
         backup.cleanup()
+
+if __name__ == "__main__":
+    main()
