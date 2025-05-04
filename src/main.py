@@ -34,6 +34,26 @@ def create_backup_task(db_manager, storage_manager):
         # 清理临时文件
         backup.cleanup()
 
+@task(name="clean-old-backups-task")
+def clean_old_backups_task(db_manager, storage_manager, days=30):
+    logger = get_run_logger()
+    
+    # 创建备份实例
+    backup = DatabaseBackup(db_manager, storage_manager)
+    
+    # 清理旧备份
+    try:
+        deleted_count = backup.clean_old_backups(days=days)
+        logger.info(f"成功清理 {deleted_count} 个超过 {days} 天的旧备份文件")
+        return deleted_count
+    except Exception as e:
+        logger.error(f"清理旧备份过程中发生错误: {str(e)}")
+        raise
+    finally:
+        # 断开连接
+        if db_manager.is_connected():
+            db_manager.disconnect()
+
 
 @flow
 def database_backup():
@@ -73,7 +93,10 @@ def database_backup():
     # 运行备份任务
     backup_path = create_backup_task(db_manager, storage_manager)
     
-    logger.info(f"备份流程完成，备份路径: {backup_path}")
+    # 清理30天前的旧备份
+    deleted_count = clean_old_backups_task(db_manager, storage_manager, days=30)
+    
+    logger.info(f"备份流程完成，备份路径: {backup_path}，清理了 {deleted_count} 个旧备份")
 
 if __name__ == "__main__":
     main()
