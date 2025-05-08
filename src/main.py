@@ -1,10 +1,11 @@
 from prefect import task, flow, get_run_logger
 from prefect.blocks.system import Secret
+from prefect.cache_policies import NO_CACHE
 from src.backup import DatabaseBackup
 import os
 import json
 
-@task(name="create-backup-task")
+@task(name="create-backup-task", cache_policy=NO_CACHE)
 def create_backup_task(db_manager, storage_manager):
     logger = get_run_logger()
     
@@ -34,7 +35,7 @@ def create_backup_task(db_manager, storage_manager):
         # 清理临时文件
         backup.cleanup()
 
-@task(name="clean-old-backups-task")
+@task(name="clean-old-backups-task", cache_policy=NO_CACHE)
 def clean_old_backups_task(db_manager, storage_manager, days=30):
     logger = get_run_logger()
     
