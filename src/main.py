@@ -139,7 +139,7 @@ def postgres_backup():
 
 
 @flow(name="database-backup")
-def main(db_type="all"):
+def database_backup(db_type="all"):
     """
     数据库备份主流程
     
@@ -161,4 +161,4 @@ def main(db_type="all"):
 
 
 if __name__ == "__main__":
-    main()
+    database_backup()
