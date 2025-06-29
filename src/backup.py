@@ -8,7 +8,7 @@ from prefect.blocks.system import Secret
 from src.database_manager import DatabaseManager
 from src.minio_manager import StorageManager
 from src.config import BACKUP_DIR
-
+import logging
 
 class DatabaseBackup:
     """数据库备份类"""
@@ -28,7 +28,7 @@ class DatabaseBackup:
         self.db_manager = db_manager
         self.storage_manager = storage_manager
         self.backup_dir = backup_dir
-        self.logger = get_run_logger()
+        self.logger = logging.getLogger(__name__)
         
         # 确保备份目录存在
         os.makedirs(self.backup_dir, exist_ok=True)
@@ -92,19 +92,25 @@ class DatabaseBackup:
     def restore_backup(self, 
                       backup_path: str,
                       local_path: Optional[str] = None,
-                      remove_local: bool = True) -> bool:
+                      remove_local: bool = True,
+                      extra_options: Optional[Dict[str, Any]] = None) -> bool:
         """
-        从备份恢复数据库（此函数仅下载备份文件，实际恢复需要手动进行或扩展此函数）
+        从备份恢复数据库
         
         Args:
             backup_path: 备份在存储服务中的路径
             local_path: 本地保存路径，如果为None则使用远程文件名
             remove_local: 恢复完成后是否删除本地文件
+            extra_options: 额外的恢复选项
             
         Returns:
-            bool: 下载是否成功
+            bool: 恢复是否成功
         """
         try:
+            # 连接数据库
+            if not self.db_manager.is_connected():
+                self.db_manager.connect()
+                
             # 连接存储服务
             if not self.storage_manager.is_connected():
                 self.storage_manager.connect()
@@ -120,17 +126,27 @@ class DatabaseBackup:
             )
             
             self.logger.info(f"已下载备份文件: {downloaded_path}")
-            self.logger.warning("注意：需要手动执行恢复操作或扩展此函数实现自动恢复")
             
-            # 如果需要，删除本地文件（通常不建议）
+            # 执行数据库恢复
+            restore_success = self.db_manager.restore(
+                sql_file=downloaded_path,
+                extra_options=extra_options
+            )
+            
+            if restore_success:
+                self.logger.info(f"数据库恢复成功，使用备份文件: {backup_path}")
+            else:
+                self.logger.warning(f"数据库恢复可能未完全成功，请检查日志")
+            
+            # 如果需要，删除本地文件
             if remove_local and os.path.exists(downloaded_path):
                 os.remove(downloaded_path)
                 self.logger.info(f"已删除本地备份文件: {downloaded_path}")
             
-            return True
+            return restore_success
             
         except Exception as e:
-            self.logger.error(f"下载备份文件失败: {str(e)}")
+            self.logger.error(f"数据库恢复失败: {str(e)}")
             raise
     
     def list_backups(self, prefix: Optional[str] = None) -> List[Dict[str, Any]]:

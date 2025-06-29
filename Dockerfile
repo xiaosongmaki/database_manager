@@ -7,9 +7,10 @@ WORKDIR /app
 # 设置时区
 ENV TZ=Asia/Tokyo
 
-# 安装系统依赖和MySQL客户端（包含mysqldump）
+# 安装系统依赖、MySQL客户端（包含mysqldump）和PostgreSQL客户端（包含pg_dump）
 RUN apt-get update && apt-get install -y --no-install-recommends \
     default-mysql-client \
+    postgresql-client \
     tzdata \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*

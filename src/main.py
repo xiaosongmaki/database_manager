@@ -2,6 +2,8 @@ from prefect import task, flow, get_run_logger
 from prefect.blocks.system import Secret
 from prefect.cache_policies import NO_CACHE
 from src.backup import DatabaseBackup
+from src.database_manager import MySQLManager, PostgreSQLManager
+from src.minio_manager import MinioManager
 import os
 import json
 
@@ -56,10 +58,10 @@ def clean_old_backups_task(db_manager, storage_manager, days=30):
             db_manager.disconnect()
 
 
-@flow
-def database_backup():
+@flow(name="mysql-backup-flow")
+def mysql_backup():
     logger = get_run_logger()
-    logger.info("开始数据库备份流程")
+    logger.info("开始MySQL数据库备份流程")
     
     # 从 Prefect 块中加载配置
     try:
@@ -69,10 +71,6 @@ def database_backup():
     except Exception as e:
         logger.error(f"无法从 Prefect Secret 块获取配置: {str(e)}")
         raise
-    
-    # 示例用法
-    from src.database_manager import MySQLManager
-    from src.minio_manager import MinioManager
     
     # 创建管理器实例 - 使用配置参数
     db_manager = MySQLManager(
@@ -98,6 +96,69 @@ def database_backup():
     deleted_count = clean_old_backups_task(db_manager, storage_manager, days=30)
     
     logger.info(f"备份流程完成，备份路径: {backup_path}，清理了 {deleted_count} 个旧备份")
+
+
+@flow(name="postgres-backup-flow")
+def postgres_backup():
+    logger = get_run_logger()
+    logger.info("开始PostgreSQL数据库备份流程")
+    
+    # 从 Prefect 块中加载配置
+    try:
+        # 获取配置
+        config = Secret.load("backup-config").get()            
+        logger.info("成功从 Prefect Secret 块中加载配置")
+    except Exception as e:
+        logger.error(f"无法从 Prefect Secret 块获取配置: {str(e)}")
+        raise
+    
+    # 创建管理器实例 - 使用配置参数
+    db_manager = PostgreSQLManager(
+        host=config["POSTGRES_HOST"],
+        port=int(config["POSTGRES_PORT"]),
+        user=config["POSTGRES_USER"],
+        password=config["POSTGRES_PASSWORD"],
+        database=config["POSTGRES_DATABASE"]
+    )
+    
+    storage_manager = MinioManager(
+        endpoint=config["MINIO_ENDPOINT"],
+        access_key=config["MINIO_ACCESS_KEY"],
+        secret_key=config["MINIO_SECRET_KEY"],
+        bucket=config["MINIO_BUCKET"],
+        secure=config["MINIO_SECURE"] if isinstance(config["MINIO_SECURE"], bool) else config["MINIO_SECURE"].lower() == "true"
+    )
+    
+    # 运行备份任务
+    backup_path = create_backup_task(db_manager, storage_manager)
+    
+    # 清理30天前的旧备份
+    deleted_count = clean_old_backups_task(db_manager, storage_manager, days=7)
+    
+    logger.info(f"备份流程完成，备份路径: {backup_path}，清理了 {deleted_count} 个旧备份")
+
+
+@flow(name="database-backup")
+def main(db_type="all"):
+    """
+    数据库备份主流程
+    
+    Args:
+        db_type: 数据库类型，支持 'mysql' 或 'postgres'
+    """
+    logger = get_run_logger()
+    logger.info(f"开始 {db_type} 数据库备份流程")
+    if db_type.lower() == "all":
+        mysql_backup()
+        postgres_backup()
+    elif db_type.lower() == "mysql":
+        mysql_backup()
+    elif db_type.lower() == "postgres":
+        postgres_backup()
+    else:
+        logger.error(f"不支持的数据库类型: {db_type}")
+        raise ValueError(f"不支持的数据库类型: {db_type}，目前仅支持 'mysql' 或 'postgres'")
+
 
 if __name__ == "__main__":
     main()
