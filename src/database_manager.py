@@ -5,6 +5,7 @@ import datetime
 import logging
 import mysql.connector
 import psycopg2
+import pymongo
 from pathlib import Path
 from typing import Optional, Dict, Any, Union
 
@@ -18,7 +19,7 @@ from src.config import (
     POSTGRES_PORT,
     POSTGRES_USER,
     POSTGRES_PASSWORD,
-    POSTGRES_DATABASE
+    POSTGRES_DATABASE,
 )
 
 class DatabaseManager(abc.ABC):
@@ -545,3 +546,274 @@ if __name__ == "__main__":
     manager.connect()
     print("连接状态:", manager.is_connected())
     manager.dump(output_dir="./tmp/mysql_dumps",filename="test.sql")
+
+
+
+class MongoDBManager(DatabaseManager):
+    """MongoDB数据库管理实现"""
+    
+    def __init__(self, 
+                 host: str = MONGODB_HOST,
+                 port: int = MONGODB_PORT,
+                 user: str = MONGODB_USER,
+                 password: str = MONGODB_PASSWORD,
+                 database: str = MONGODB_DATABASE,
+                 auth_database: str = MONGODB_AUTH_DATABASE):
+        """
+        初始化MongoDB管理器
+        
+        Args:
+            host: 数据库主机地址
+            port: 数据库端口
+            user: 数据库用户名
+            password: 数据库密码
+            database: 数据库名称
+            auth_database: 认证数据库名称
+        """
+        self.host = host
+        self.port = port
+        self.user = user
+        self.password = password
+        self.database = database
+        self.auth_database = auth_database
+        self.client = None
+        self.logger = logging.getLogger(__name__)
+    
+    def connect(self) -> None:
+        """连接到MongoDB数据库"""
+        try:
+            # 构建连接字符串
+            if self.user and self.password:
+                connection_string = f"mongodb://{self.user}:{self.password}@{self.host}:{self.port}/{self.auth_database}"
+            else:
+                connection_string = f"mongodb://{self.host}:{self.port}/"
+            
+            self.client = pymongo.MongoClient(connection_string)
+            
+            # 测试连接
+            self.client.admin.command('ping')
+            self.logger.info(f"成功连接到MongoDB数据库: {self.host}:{self.port}/{self.database}")
+        except pymongo.errors.PyMongoError as err:
+            self.logger.error(f"连接MongoDB数据库失败: {err}")
+            raise
+    
+    def disconnect(self) -> None:
+        """断开MongoDB数据库连接"""
+        if self.client:
+            self.client.close()
+            self.client = None
+            self.logger.info("已断开MongoDB数据库连接")
+    
+    def is_connected(self) -> bool:
+        """检查是否已连接到MongoDB数据库"""
+        if self.client is None:
+            return False
+        
+        try:
+            # 尝试执行一个简单命令来验证连接
+            self.client.admin.command('ping')
+            return True
+        except:
+            return False
+    
+    def dump(self, 
+             output_dir: str, 
+             lock_tables: bool = False,  # MongoDB中不适用，保留参数兼容性
+             filename: Optional[str] = None,
+             extra_options: Optional[Dict[str, Any]] = None,
+             all_databases: bool = False) -> str:
+        """
+        使用mongodump导出MongoDB数据库
+        
+        Args:
+            output_dir: 导出文件保存目录
+            lock_tables: 不适用于MongoDB，保留参数兼容性
+            filename: 自定义导出文件名，如果为None则自动生成
+            extra_options: 额外的导出选项
+            all_databases: 是否导出所有数据库，默认为False
+            
+        Returns:
+            str: 导出文件的完整路径
+        """
+        # 确保输出目录存在
+        Path(output_dir).mkdir(parents=True, exist_ok=True)
+        
+        # 生成文件名
+        if filename is None:
+            timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+            if all_databases:
+                filename = f"all_databases_{timestamp}"
+            else:
+                filename = f"{self.database}_{timestamp}"
+        else:
+            # 移除可能的文件扩展名，因为mongodump创建目录
+            filename = os.path.splitext(filename)[0]
+        
+        # 完整输出路径
+        output_path = os.path.join(output_dir, filename)
+        
+        # 构建mongodump命令
+        cmd = [
+            "mongodump",
+            "--host", f"{self.host}:{self.port}",
+            "--out", output_path
+        ]
+        
+        # 添加认证信息
+        if self.user and self.password:
+            cmd.extend(["--username", self.user])
+            cmd.extend(["--password", self.password])
+            cmd.extend(["--authenticationDatabase", self.auth_database])
+        
+        # 是否导出所有数据库
+        if not all_databases and self.database:
+            cmd.extend(["--db", self.database])
+        
+        # 添加额外选项
+        if extra_options:
+            for key, value in extra_options.items():
+                if value is True:
+                    cmd.append(f"--{key}")
+                elif value is not False and value is not None:
+                    cmd.extend([f"--{key}", str(value)])
+        
+        try:
+            # 执行mongodump命令
+            if all_databases:
+                self.logger.info("开始导出所有MongoDB数据库")
+            else:
+                self.logger.info(f"开始导出MongoDB数据库: {self.database}")
+            self.logger.debug(f"执行命令: {' '.join(cmd)}")
+            
+            process = subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                universal_newlines=True
+            )
+            
+            stdout, stderr = process.communicate()
+            
+            if process.returncode != 0:
+                self.logger.error(f"导出MongoDB数据库失败: {stderr}")
+                raise Exception(f"导出MongoDB数据库失败: {stderr}")
+            
+            if all_databases:
+                self.logger.info(f"成功导出所有MongoDB数据库到: {output_path}")
+            else:
+                self.logger.info(f"成功导出MongoDB数据库到: {output_path}")
+            
+            # 创建一个tar.gz压缩文件以便于存储和传输
+            import tarfile
+            tar_path = f"{output_path}.tar.gz"
+            with tarfile.open(tar_path, "w:gz") as tar:
+                tar.add(output_path, arcname=os.path.basename(output_path))
+            
+            # 删除原始目录
+            import shutil
+            shutil.rmtree(output_path)
+            
+            self.logger.info(f"已创建压缩备份文件: {tar_path}")
+            return tar_path
+            
+        except Exception as e:
+            self.logger.error(f"导出MongoDB数据库时发生错误: {str(e)}")
+            if os.path.exists(output_path):
+                import shutil
+                shutil.rmtree(output_path, ignore_errors=True)
+            raise
+    
+    def restore(self,
+               sql_file: str,  # 对于MongoDB，这实际上是备份目录或tar.gz文件
+               extra_options: Optional[Dict[str, Any]] = None) -> bool:
+        """
+        使用mongorestore从备份文件恢复MongoDB数据库
+        
+        Args:
+            sql_file: 备份文件的路径（可以是目录或tar.gz文件）
+            extra_options: 额外的恢复选项
+            
+        Returns:
+            bool: 恢复是否成功
+        """
+        if not os.path.exists(sql_file):
+            self.logger.error(f"备份文件不存在: {sql_file}")
+            raise FileNotFoundError(f"备份文件不存在: {sql_file}")
+        
+        # 处理压缩文件
+        restore_path = sql_file
+        temp_dir = None
+        
+        if sql_file.endswith('.tar.gz'):
+            import tarfile
+            import tempfile
+            
+            # 创建临时目录解压文件
+            temp_dir = tempfile.mkdtemp()
+            with tarfile.open(sql_file, "r:gz") as tar:
+                tar.extractall(temp_dir)
+            
+            # 找到解压后的目录
+            extracted_items = os.listdir(temp_dir)
+            if len(extracted_items) == 1:
+                restore_path = os.path.join(temp_dir, extracted_items[0])
+            else:
+                restore_path = temp_dir
+        
+        # 构建mongorestore命令
+        cmd = [
+            "mongorestore",
+            "--host", f"{self.host}:{self.port}"
+        ]
+        
+        # 添加认证信息
+        if self.user and self.password:
+            cmd.extend(["--username", self.user])
+            cmd.extend(["--password", self.password])
+            cmd.extend(["--authenticationDatabase", self.auth_database])
+        
+        # 添加额外选项
+        if extra_options:
+            for key, value in extra_options.items():
+                if value is True:
+                    cmd.append(f"--{key}")
+                elif value is not False and value is not None:
+                    cmd.extend([f"--{key}", str(value)])
+        
+        # 如果指定了数据库，添加数据库选项
+        if self.database and os.path.isdir(os.path.join(restore_path, self.database)):
+            cmd.extend(["--db", self.database])
+            cmd.append(os.path.join(restore_path, self.database))
+        else:
+            cmd.append(restore_path)
+        
+        try:
+            # 执行mongorestore命令
+            self.logger.info(f"开始从备份文件恢复MongoDB数据库: {self.database}")
+            self.logger.debug(f"执行命令: {' '.join(cmd)}")
+            
+            process = subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                universal_newlines=True
+            )
+            
+            stdout, stderr = process.communicate()
+            
+            if process.returncode != 0:
+                self.logger.error(f"恢复MongoDB数据库失败: {stderr}")
+                raise Exception(f"恢复MongoDB数据库失败: {stderr}")
+            
+            self.logger.info(f"成功从备份文件恢复MongoDB数据库: {self.database}")
+            return True
+            
+        except Exception as e:
+            self.logger.error(f"恢复MongoDB数据库时发生错误: {str(e)}")
+            raise
+        finally:
+            # 清理临时目录
+            if temp_dir and os.path.exists(temp_dir):
+                import shutil
+                shutil.rmtree(temp_dir, ignore_errors=True)
+
